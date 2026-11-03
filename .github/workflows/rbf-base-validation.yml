@@ -1,0 +1,46 @@
+name: RBF fix baseline comparisons
+on:
+  push:
+    branches: ['ci-rbf-base/**']
+permissions:
+  contents: read
+env:
+  GOWORK: 'off'
+jobs:
+  base:
+    name: base ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: dev-mainnet-assumptions
+          command: go test -json -count=1 -timeout=10m -tags 'dev autopilotrpc chainrpc invoicesrpc neutrinorpc offersrpc peersrpc signrpc walletrpc
+            watchtowerrpc nolog' -run '^(TestApplyBlake2bChainConfig|TestBackendChoicesRefused|TestBlake2bChainIdentityFileOption|TestNeutrinoBlake2bParams|TestPeerNetworksOptionsThatContradict|TestSilentPeersAreKeptByDefault)$'
+            .
+        - name: postgres-testmain
+          command: go test -json -count=1 -timeout=10m -tags 'dev kvdb_postgres autopilotrpc chainrpc invoicesrpc neutrinorpc offersrpc peersrpc
+            signrpc walletrpc watchtowerrpc nolog' -run '^(TestApplyBlake2bChainConfig|TestBackendChoicesRefused|TestBlake2bChainIdentityFileOption|TestBuildSingleSpliced|TestChannelBackupRefreshOnSplice|TestCreateListDisableEnable|TestCreateOfferFields|TestCreateOfferForThisChain|TestCreateOfferRejects|TestDecodeBolt12|TestDecodeOnBitcoinsGenesis|TestDisableUnmarkedOffers|TestFetchPayAndList|TestFetchPayAndListOnBitcoinsGenesis|TestGraphEdgeRewrite|TestInvoiceStore|TestListDisableServe|TestListSkipsDamagedRecord|TestMoveSpliceEdge|TestMoveSpliceEdgeAfterCrash|TestNeutrinoBlake2bParams|TestNewManagerRequirements|TestNewRequirements|TestOfferForRequest|TestOfferPaths|TestOfferWithNoChainsIsForThisChainOnMainnet|TestPayInvoiceStoredCanonical|TestPeerNetworksOptionsThatContradict|TestPendingSplicesRestored|TestPrune|TestRateLimit|TestRateLimitedRequestIsToldOnce|TestReserveHoldsItsPlace|TestRestoreSplicedChannel|TestRestoreUnsplicedChannel|TestServeAmountAndQuantity|TestServeOnBitcoinsGenesis|TestServeOverOfferPath|TestServePayoutRequest|TestServeRefusals|TestServeRefusesRequestWithoutBlake2b|TestSharedLimitsAreChargedLast|TestSilentPeersAreKeptByDefault|TestSpliceAwareGraph|TestSpliceFieldsOfChannelUpdate|TestStoreListUpdateDelete|TestStoreNoExpiryAndInactive|TestStoreRoundTrip)$'
+            . ./chanbackup ./channeldb/migration37 ./lnrpc/offersrpc ./offers ./offerserve
+        - name: existing-races-default
+          command: GORACE='history_size=7 halt_on_errors=1' go test -json -race -count=3 -timeout=10m -tags 'dev  autopilotrpc chainrpc invoicesrpc
+            neutrinorpc offersrpc peersrpc signrpc walletrpc watchtowerrpc nolog' -run '^(TestChainIdentityWaitsForHeight|TestChainWatcherRestoredMoved(NotCommitment|KeepsWatching))$'
+            ./chainreg ./contractcourt
+        - name: existing-races-test_db_sqlite
+          command: GORACE='history_size=7 halt_on_errors=1' go test -json -race -count=3 -timeout=10m -tags 'dev test_db_sqlite autopilotrpc chainrpc
+            invoicesrpc neutrinorpc offersrpc peersrpc signrpc walletrpc watchtowerrpc nolog' -run '^(TestChainIdentityWaitsForHeight|TestChainWatcherRestoredMoved(NotCommitment|KeepsWatching))$'
+            ./chainreg ./contractcourt
+        - name: existing-races-test_db_postgres
+          command: GORACE='history_size=7 halt_on_errors=1' go test -json -race -count=3 -timeout=10m -tags 'dev test_db_postgres autopilotrpc
+            chainrpc invoicesrpc neutrinorpc offersrpc peersrpc signrpc walletrpc watchtowerrpc nolog' -run '^(TestChainIdentityWaitsForHeight|TestChainWatcherRestoredMoved(NotCommitment|KeepsWatching))$'
+            ./chainreg ./contractcourt
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ./.github/actions/cleanup-space
+    - uses: ./.github/actions/setup-go
+      with:
+        go-version: 1.27.3
+        key-prefix: fork-integration-test
+    - name: Reproduce baseline failure
+      run: ${{ matrix.command }}
