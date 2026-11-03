@@ -1,0 +1,69 @@
+name: Fork integration tests
+
+# Standard SHA256 regtest, using the integration build's bitcoind exemption.
+# BLAKE2b regtest coverage is separate work.
+on:
+  push:
+    branches: ['blake2b', 'blake2b-next', 'blake2b-next-*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOWORK: 'off'
+  BITCOIN_VERSION: '29'
+  GO_VERSION: '1.27.3'
+  TRANCHES: 16
+
+jobs:
+  itest:
+    name: itest ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: bitcoind
+            args: backend=bitcoind
+          - name: bitcoind-sqlite
+            args: backend=bitcoind dbbackend=sqlite
+          - name: bitcoind-postgres
+            args: backend=bitcoind dbbackend=postgres
+          - name: bitcoind-rpcpolling
+            args: backend="bitcoind rpcpolling"
+          - name: bitcoind-notxindex
+            args: backend="bitcoind notxindex"
+          - name: bitcoind-miner
+            args: backend=bitcoind minerbackend=bitcoind
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean up runner space
+        uses: ./.github/actions/cleanup-space
+      - name: Setup Go
+        uses: ./.github/actions/setup-go
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          key-prefix: fork-integration-test
+      - name: Go version matches the Makefile
+        run: test "$(go env GOVERSION)" = "go$(sed -n 's/^GO_VERSION = //p' Makefile)"
+      - name: Install bitcoind
+        run: ./scripts/install_bitcoind.sh "$BITCOIN_VERSION"
+      - name: Integration tests
+        run: make itest-parallel tranches=${{ env.TRANCHES }} ${{ matrix.args }} shuffleseed=41625317078 verbose=1
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-itest-${{ matrix.name }}
+          path: |
+            itest/**/*.log
+            itest/postgres.log
+          include-hidden-files: true
+          retention-days: 7

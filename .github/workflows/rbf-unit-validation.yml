@@ -1,0 +1,114 @@
+name: RBF fix unit validation (.23)
+'on':
+  push:
+    branches:
+    - blake2b-next-rbf-close-v23
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  GOWORK: 'off'
+  GO_VERSION: 1.27.3
+  BITCOIN_VERSION: '29'
+jobs:
+  unit:
+    name: unit ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: unit-cover
+          command: make unit-cover GOTEST='go test -json'
+        - name: unit-kvdb_etcd
+          command: make unit tags="kvdb_etcd" GOTEST='go test -json'
+        - name: unit-kvdb_postgres
+          command: make unit tags="kvdb_postgres" GOTEST='go test -json'
+        - name: unit-kvdb_sqlite
+          command: make unit tags="kvdb_sqlite" GOTEST='go test -json'
+        - name: unit-test_db_sqlite
+          command: make unit tags="test_db_sqlite" GOTEST='go test -json'
+        - name: unit-test_db_postgres
+          command: make unit tags="test_db_postgres" GOTEST='go test -json'
+        - name: unit-race
+          command: make unit-race GOTEST='go test -json'
+        - name: unit-race-test_db_sqlite
+          command: make unit-race tags="test_db_sqlite" GOTEST='go test -json'
+        - name: unit-race-test_db_postgres
+          command: make unit-race tags="test_db_postgres" GOTEST='go test -json'
+        - name: unit-module
+          command: make unit-module GOTEST='go test -json'
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - uses: ./.github/actions/cleanup-space
+    - uses: actions/checkout@v4
+      with:
+        repository: lightninglabs/lnd-fuzz
+        ref: 3cb5bcea972ace77a7b89808b6ac186ae5baf5c2
+        path: lnd-fuzz
+    - name: Import CI fuzz seeds
+      run: 'git -C lnd-fuzz rev-parse HEAD
+
+        rsync -a --ignore-existing --exclude=.git lnd-fuzz/ ./
+
+        '
+    - uses: ./.github/actions/setup-go
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        key-prefix: fork-integration-test
+    - name: Install bitcoind
+      run: ./scripts/install_bitcoind.sh "$BITCOIN_VERSION"
+    - name: Unit matrix
+      run: ${{ matrix.command }}
+  base:
+    name: base ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: dev-mainnet-assumptions
+          command: go test -json -count=1 -timeout=10m -tags 'dev autopilotrpc chainrpc invoicesrpc neutrinorpc offersrpc peersrpc signrpc walletrpc
+            watchtowerrpc nolog' -run '^(TestApplyBlake2bChainConfig|TestBackendChoicesRefused|TestBlake2bChainIdentityFileOption|TestNeutrinoBlake2bParams|TestPeerNetworksOptionsThatContradict|TestSilentPeersAreKeptByDefault)$'
+            .
+        - name: postgres-testmain
+          command: go test -json -count=1 -timeout=10m -tags 'dev kvdb_postgres autopilotrpc chainrpc invoicesrpc neutrinorpc offersrpc peersrpc
+            signrpc walletrpc watchtowerrpc nolog' -run '^(TestApplyBlake2bChainConfig|TestBackendChoicesRefused|TestBlake2bChainIdentityFileOption|TestBuildSingleSpliced|TestChannelBackupRefreshOnSplice|TestCreateListDisableEnable|TestCreateOfferFields|TestCreateOfferForThisChain|TestCreateOfferRejects|TestDecodeBolt12|TestDecodeOnBitcoinsGenesis|TestDisableUnmarkedOffers|TestFetchPayAndList|TestFetchPayAndListOnBitcoinsGenesis|TestGraphEdgeRewrite|TestInvoiceStore|TestListDisableServe|TestListSkipsDamagedRecord|TestMoveSpliceEdge|TestMoveSpliceEdgeAfterCrash|TestNeutrinoBlake2bParams|TestNewManagerRequirements|TestNewRequirements|TestOfferForRequest|TestOfferPaths|TestOfferWithNoChainsIsForThisChainOnMainnet|TestPayInvoiceStoredCanonical|TestPeerNetworksOptionsThatContradict|TestPendingSplicesRestored|TestPrune|TestRateLimit|TestRateLimitedRequestIsToldOnce|TestReserveHoldsItsPlace|TestRestoreSplicedChannel|TestRestoreUnsplicedChannel|TestServeAmountAndQuantity|TestServeOnBitcoinsGenesis|TestServeOverOfferPath|TestServePayoutRequest|TestServeRefusals|TestServeRefusesRequestWithoutBlake2b|TestSharedLimitsAreChargedLast|TestSilentPeersAreKeptByDefault|TestSpliceAwareGraph|TestSpliceFieldsOfChannelUpdate|TestStoreListUpdateDelete|TestStoreNoExpiryAndInactive|TestStoreRoundTrip)$'
+            . ./chanbackup ./channeldb/migration37 ./lnrpc/offersrpc ./offers ./offerserve
+        - name: existing-races-default
+          command: GORACE='history_size=7 halt_on_errors=1' go test -json -race -count=3 -timeout=10m -tags 'dev  autopilotrpc chainrpc invoicesrpc
+            neutrinorpc offersrpc peersrpc signrpc walletrpc watchtowerrpc nolog' -run '^(TestChainIdentityWaitsForHeight|TestChainWatcherRestoredMoved(NotCommitment|KeepsWatching))$'
+            ./chainreg ./contractcourt
+        - name: existing-races-test_db_sqlite
+          command: GORACE='history_size=7 halt_on_errors=1' go test -json -race -count=3 -timeout=10m -tags 'dev test_db_sqlite autopilotrpc chainrpc
+            invoicesrpc neutrinorpc offersrpc peersrpc signrpc walletrpc watchtowerrpc nolog' -run '^(TestChainIdentityWaitsForHeight|TestChainWatcherRestoredMoved(NotCommitment|KeepsWatching))$'
+            ./chainreg ./contractcourt
+        - name: existing-races-test_db_postgres
+          command: GORACE='history_size=7 halt_on_errors=1' go test -json -race -count=3 -timeout=10m -tags 'dev test_db_postgres autopilotrpc
+            chainrpc invoicesrpc neutrinorpc offersrpc peersrpc signrpc walletrpc watchtowerrpc nolog' -run '^(TestChainIdentityWaitsForHeight|TestChainWatcherRestoredMoved(NotCommitment|KeepsWatching))$'
+            ./chainreg ./contractcourt
+        - name: rbf-regressions
+          command: go test -json -count=1 -timeout=2m -run '^TestRbfReconnect' -v ./peer
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: 8a79a7b24b4a87a076429e8da509dfd38205fa53
+        fetch-depth: 0
+    - name: Copy regression test to unchanged base
+      if: matrix.name == 'rbf-regressions'
+      run: 'git fetch --no-tags origin "$GITHUB_SHA"
+
+        git show "$GITHUB_SHA:peer/rbf_reconnect_test.go" > peer/rbf_reconnect_test.go'
+    - uses: ./.github/actions/cleanup-space
+    - uses: ./.github/actions/setup-go
+      with:
+        go-version: 1.27.3
+        key-prefix: fork-integration-test
+    - name: Reproduce baseline failure
+      run: ${{ matrix.command }}
