@@ -1,0 +1,66 @@
+name: RBF fix unit validation
+on:
+  push:
+    branches: ['ci-rbf-unit/**']
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  GOWORK: 'off'
+  GO_VERSION: 1.27.3
+  BITCOIN_VERSION: '29'
+jobs:
+  unit:
+    name: unit ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: unit-cover
+          command: make unit-cover GOTEST='go test -json'
+        - name: unit-kvdb_etcd
+          command: make unit tags="kvdb_etcd" GOTEST='go test -json'
+        - name: unit-kvdb_postgres
+          command: make unit tags="kvdb_postgres" GOTEST='go test -json'
+        - name: unit-kvdb_sqlite
+          command: make unit tags="kvdb_sqlite" GOTEST='go test -json'
+        - name: unit-test_db_sqlite
+          command: make unit tags="test_db_sqlite" GOTEST='go test -json'
+        - name: unit-test_db_postgres
+          command: make unit tags="test_db_postgres" GOTEST='go test -json'
+        - name: unit-race
+          command: make unit-race GOTEST='go test -json'
+        - name: unit-race-test_db_sqlite
+          command: make unit-race tags="test_db_sqlite" GOTEST='go test -json'
+        - name: unit-race-test_db_postgres
+          command: make unit-race tags="test_db_postgres" GOTEST='go test -json'
+        - name: unit-module
+          command: make unit-module GOTEST='go test -json'
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - uses: ./.github/actions/cleanup-space
+    - uses: actions/checkout@v4
+      with:
+        repository: lightninglabs/lnd-fuzz
+        ref: 3cb5bcea972ace77a7b89808b6ac186ae5baf5c2
+        path: lnd-fuzz
+    - name: Import CI fuzz seeds
+      run: 'git -C lnd-fuzz rev-parse HEAD
+
+        rsync -a --ignore-existing --exclude=.git lnd-fuzz/ ./
+
+        '
+    - uses: ./.github/actions/setup-go
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        key-prefix: fork-integration-test
+    - name: Install bitcoind
+      run: ./scripts/install_bitcoind.sh "$BITCOIN_VERSION"
+    - name: Unit matrix
+      run: ${{ matrix.command }}
